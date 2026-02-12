@@ -1,80 +1,91 @@
+# import pandas as pd
+# from django.core.management.base import BaseCommand
+# from core.models import FuelStation
+
+# class Command(BaseCommand):
+#     help = 'Load ALL 8000 records FAST'
+
+#     def handle(self, *args, **kwargs):
+#         try:
+#             print("Reading CSV...")
+#             df = pd.read_csv('fuel-prices-for-be-assessment.csv')
+            
+#             print("Clearing old data...")
+#             FuelStation.objects.all().delete()
+
+#             print("Preparing 8000 records...")
+#             stations = [
+#                 FuelStation(
+#                     opis_id=row['OPIS Truckstop ID'],
+#                     name=row['Truckstop Name'],
+#                     address=row['Address'],
+#                     city=row['City'],
+#                     state=row['State'],
+#                     rack_id=row['Rack ID'],
+#                     retail_price=row['Retail Price'],
+#                     latitude=None,
+#                     longitude=None
+#                 )
+#                 for index, row in df.iterrows()
+#             ]
+
+#             print("Saving to MySQL...")
+#             FuelStation.objects.bulk_create(stations)
+#             print("SUCCESS! 8000 records loaded.")
+
+#         except Exception as e:
+#             print(f"Error: {e}")
+
+
+
+
+
+
+
 import pandas as pd
 from django.core.management.base import BaseCommand
 from core.models import FuelStation
-from geopy.geocoders import ArcGIS
-import time
 
 class Command(BaseCommand):
-    help = 'Load fuel prices from CSV and geocode them safely'
+    help = 'Load ALL 8000 records FAST and skip duplicates'
 
     def handle(self, *args, **kwargs):
         file_path = 'fuel-prices-for-be-assessment.csv'
-        
         try:
-            # Read the CSV
+            print("Reading CSV...")
             df = pd.read_csv(file_path)
-            print(f"Found {len(df)} records in CSV.")
-
-            # Switch to ArcGIS (More reliable than Nominatim for this)
-            geolocator = ArcGIS(user_agent="fuel_project_student_v2")
-
-            count = 0
-            success_count = 0
             
-            # CLEAR OLD DATA (Optional: keeps database clean)
+            print("Clearing old data...")
             FuelStation.objects.all().delete()
-            print("Cleared old data from database.")
+
+            print("Preparing records...")
+            stations_to_create = []
+            seen_ids = set() # డూప్లికేట్లను కనిపెట్టడానికి
 
             for index, row in df.iterrows():
-                # --- DEMO LIMIT ---
-                # Remove these 2 lines if you want to wait 3 hours for all 8000 lines
-                if count >= 60: 
-                    print("Limit reached (60 stations) for Video Demo. Stopping import.")
-                    break
-                # ------------------
+                opis_id = row['OPIS Truckstop ID']
+                
+                # ఒకవేళ ఐడి ఇప్పటికే ఉంటే దానిని స్కిప్ చేస్తుంది
+                if opis_id in seen_ids:
+                    continue
+                seen_ids.add(opis_id)
 
-                try:
-                    # Create address string
-                    full_address = f"{row['Address']}, {row['City']}, {row['State']}, USA"
-                    
-                    # Try to geocode
-                    location = None
-                    try:
-                        location = geolocator.geocode(full_address, timeout=10)
-                    except Exception as geo_error:
-                        print(f"   > Could not map: {full_address} (Error: {geo_error})")
+                station = FuelStation(
+                    opis_id=opis_id,
+                    name=row['Truckstop Name'],
+                    address=row['Address'],
+                    city=row['City'],
+                    state=row['State'],
+                    rack_id=row['Rack ID'],
+                    retail_price=row['Retail Price'],
+                    latitude=None,
+                    longitude=None
+                )
+                stations_to_create.append(station)
 
-                    lat = location.latitude if location else None
-                    lng = location.longitude if location else None
+            print("Saving to MySQL (Bulk Insert)...")
+            FuelStation.objects.bulk_create(stations_to_create)
+            print(f"SUCCESS! {len(stations_to_create)} records loaded.")
 
-                    # Save to DB
-                    FuelStation.objects.create(
-                        opis_id=row['OPIS Truckstop ID'],
-                        name=row['Truckstop Name'],
-                        address=row['Address'],
-                        city=row['City'],
-                        state=row['State'],
-                        rack_id=row['Rack ID'],
-                        retail_price=row['Retail Price'],
-                        latitude=lat,
-                        longitude=lng
-                    )
-                    
-                    if lat:
-                        success_count += 1
-                        print(f"[{count}] Imported: {row['Truckstop Name']} ({lat}, {lng})")
-                    else:
-                        print(f"[{count}] Imported (No Location): {row['Truckstop Name']}")
-
-                    count += 1
-                    
-                    # Tiny pause to be nice to the API
-                    time.sleep(0.5)
-
-                except Exception as e:
-                    print(f"Error on row {index}: {e}")
-
-            print(f"Finished! Successfully imported {count} stations ({success_count} with GPS).")
-
-        except FileNotFoundError:
-            print("CSV file not found. Please place 'fuel-prices-for-be-assessment.csv' in the root directory.")
+        except Exception as e:
+            print(f"Error: {e}")
